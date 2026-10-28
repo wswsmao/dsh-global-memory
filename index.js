@@ -43,8 +43,14 @@ export const inject = ['storageDomain', 'systemPrompt', 'webServer', 'connection
 /** Where the memory block sits: right after the per-session ledger. */
 const CONTEXT_ORDER = 155
 
-/** Backend table name and domain name share this value. */
-const DOMAIN_NAME = 'global-memory'
+/**
+ * Backend unit name.
+ *
+ * The storage layer requires `^[a-z][a-z0-9_]*$`, so this uses an underscore.
+ * The route prefix, the projection-free store key, and the plugin id stay
+ * independent of it — only the on-disk unit name is constrained.
+ */
+const DOMAIN_NAME = 'global_memory'
 
 /** One stored entry. Loose on read so an older reader tolerates newer fields. */
 const entrySchema = z.object({
