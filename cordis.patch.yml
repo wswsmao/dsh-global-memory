@@ -1,0 +1,7 @@
+- insert:
+    - id: global-memory
+      name: '@local/dsh-global-memory'
+      config:
+        budgetTokens: 1200
+        textLanguage: auto
+        allowAgentWrite: false
