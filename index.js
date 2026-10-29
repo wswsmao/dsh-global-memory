@@ -91,25 +91,60 @@ export function apply(ctx, config = {}) {
   /** Last known store, so synchronous prompt reads never await. */
   let cache = emptyStore()
 
-  /** Open the domain once, keeping the handle for the plugin's lifetime. */
-  const ready = ctx.storageDomain.open(defineDomain({
+  /** The domain spec is fixed for every (re)open of this store. */
+  const spec = defineDomain({
     name: DOMAIN_NAME,
     version: 1,
     layout: 'single',
     global: { schema: storeSchema, initial: emptyStore() },
     tables: {},
-  })).then((opened) => {
+  })
+
+  /**
+   * Open the domain and adopt what it loaded.
+   *
+   * Kept as a function rather than a one-shot promise because {@link reload}
+   * needs the exact same two steps: opening re-reads the stored document, and
+   * adopting is what makes the synchronous prompt provider reflect it.
+   */
+  const open = async () => {
+    const opened = await ctx.storageDomain.open(spec)
     domain = opened
     const stored = opened.global.get()
     if (isStoreShape(stored)) cache = stored
     return opened
-  })
+  }
+  const ready = open()
+
   ctx.effect(() => () => {
     // The facility does not own this handle: closing is the caller's job.
     const closing = domain?.close()
     domain = undefined
     return closing
   }, 'global-memory: domain lifecycle')
+
+  /**
+   * Re-read the store from storage.
+   *
+   * The domain layer keeps the whole document in memory once opened, so an edit
+   * made outside this process — hand-editing the JSON, restoring a backup,
+   * another tool writing it — is invisible until the domain is reopened. Rather
+   * than watch the file (which would need a path the domain deliberately does
+   * not expose), this closes the handle and opens it again; `open()` performs
+   * the `loadAll()` that produces the fresh value.
+   *
+   * Writes here are serialised by the domain's own write chain and drained by
+   * `close()`, so a reload never races a pending `commit`.
+   *
+   * @returns {Promise<object>} the reloaded store.
+   */
+  const reload = async () => {
+    const previous = domain
+    domain = undefined
+    if (previous !== undefined) await previous.close()
+    await open()
+    return cache
+  }
 
   /** Persist the next store and refresh the synchronous cache. */
   const commit = async (next) => {
@@ -157,6 +192,7 @@ export function apply(ctx, config = {}) {
     ready,
     read: () => cache,
     commit,
+    reload,
     view: () => viewStore(cache, options),
     validate: validateEntryInput,
     add: (value) => addEntry(cache, value),

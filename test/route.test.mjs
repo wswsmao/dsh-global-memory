@@ -15,13 +15,15 @@ function makeHarness(initial = emptyStore()) {
     connection: { requestRejection: () => undefined },
     effect: (factory) => factory(),
   }
-  const state = { store: initial, commits: 0 }
+  const state = { store: initial, commits: 0, reloads: 0 }
   const host = {
     prefix: ROUTE_PREFIX,
     ready: Promise.resolve(),
     read: () => state.store,
     view: () => viewStore(state.store, OPTIONS),
     commit: async (next) => { state.store = next; state.commits += 1 },
+    // Mirrors the host half: reload re-reads storage and adopts what it found.
+    reload: async () => { state.reloads += 1; return state.store },
     validate: validateEntryInput,
     add: (value) => addEntry(state.store, value),
     update: (id, value) => updateEntry(state.store, id, value),
@@ -197,4 +199,36 @@ test('a GET to a mutation route is refused', async () => {
   const { registered } = makeHarness()
   const result = await call(registered[0].handler, { method: 'GET', path: `${ROUTE_PREFIX}/add` })
   assert.equal(result.status, 405)
+})
+
+test('reload re-reads storage and returns the fresh state', async () => {
+  // The regression this guards: the host keeps the document in memory, so an
+  // edit made outside the process stayed invisible in both the page and the
+  // prompt until a full restart.
+  const { registered, state } = makeHarness()
+  const seeded = addEntry(state.store, { text: '旧内容', tags: [] }, 1000)
+  state.store = seeded
+  // Simulate another process rewriting the file, then reloading.
+  const rewritten = addEntry({ ...seeded, entries: [] }, { text: '外部写入的内容', tags: [] }, 2000)
+  state.store = rewritten
+  const result = await call(registered[0].handler, { path: `${ROUTE_PREFIX}/reload` })
+  assert.equal(result.status, 200)
+  assert.equal(result.json.ok, true)
+  assert.equal(state.reloads, 1)
+  assert.equal(result.json.state.entries[0].text, '外部写入的内容')
+})
+
+test('reload does not require a revision', async () => {
+  // Reload is a read of the medium, not a write built on a prior read, so the
+  // optimistic-lock precondition that guards mutations must not apply here.
+  const { registered, state } = makeHarness()
+  const result = await call(registered[0].handler, { path: `${ROUTE_PREFIX}/reload` })
+  assert.equal(result.status, 200)
+  assert.equal(state.reloads, 1)
+})
+
+test('reload never commits a write', async () => {
+  const { registered, state } = makeHarness()
+  await call(registered[0].handler, { path: `${ROUTE_PREFIX}/reload` })
+  assert.equal(state.commits, 0)
 })

@@ -44,6 +44,8 @@ window.__ModuleLoader__.load({
       'entry.confirmRemove': '确定删除这条记忆？',
       'error.stale': '这份记忆已在别处被修改，请刷新后再改。',
       'action.refresh': '刷新',
+      'action.reload': '重新读取',
+      'action.reloadHint': '从磁盘重读。手工改过存储文件或恢复了备份后使用。',
       'loading': '加载中…',
     }
 
@@ -71,6 +73,8 @@ window.__ModuleLoader__.load({
       'entry.confirmRemove': 'Delete this memory?',
       'error.stale': 'This memory changed elsewhere; refresh before editing.',
       'action.refresh': 'Refresh',
+      'action.reload': 'Reload from disk',
+      'action.reloadHint': 'Re-read the stored file. Use after editing it by hand or restoring a backup.',
       'loading': 'Loading…',
     }
 
@@ -82,6 +86,7 @@ window.__ModuleLoader__.load({
 .gm-usage { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); font-size: 12px; }
 .gm-usage-label { color: var(--dsw-alias-label-secondary); }
 .gm-usage-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+.gm-usage-spacer { flex: 1; }
 .gm-usage[data-state="over"] { border-color: var(--dsw-alias-state-error-primary); }
 .gm-usage[data-state="over"] .gm-usage-value { color: var(--dsw-alias-state-error-primary); }
 .gm-usage-note { flex-basis: 100%; color: var(--dsw-alias-label-secondary); font-size: 11px; }
@@ -267,6 +272,26 @@ window.__ModuleLoader__.load({
         }
       }, [state])
 
+      /**
+       * Re-read the store from disk.
+       *
+       * The host keeps the document in memory, so a change made outside it
+       * (hand-editing the JSON, restoring a backup) is invisible until reopened.
+       * This button is the manual escape hatch for exactly that case.
+       */
+      const reload = useCallback(async () => {
+        setBusy(true)
+        try {
+          const payload = await request('/reload', { method: 'POST' })
+          setState(payload.state)
+          setError(null)
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : String(failure))
+        } finally {
+          setBusy(false)
+        }
+      }, [])
+
       const usage = state?.usage
       const entries = useMemo(() => (Array.isArray(state?.entries) ? state.entries : []), [state])
       const usageState = usage === undefined ? 'ok' : usage.fits === false ? 'over' : usage.tokens / usage.budget > 0.85 ? 'near' : 'ok'
@@ -284,6 +309,14 @@ window.__ModuleLoader__.load({
           { className: 'gm-usage', 'data-state': usageState },
           h('span', { className: 'gm-usage-label' }, t('usage.label')),
           h('span', { className: 'gm-usage-value' }, t('usage.value', { tokens: String(usage.tokens), budget: String(usage.budget) })),
+          h('span', { className: 'gm-usage-spacer' }),
+          h('button', {
+            type: 'button',
+            className: 'gm-btn',
+            disabled: busy,
+            title: t('action.reloadHint'),
+            onClick: () => void reload(),
+          }, t('action.reload')),
           usageState === 'over' ? h('span', { className: 'gm-usage-note' }, t('usage.over')) : null,
           usageState === 'near' ? h('span', { className: 'gm-usage-note' }, t('usage.near')) : null,
           usage.duplicateCount > 0 ? h('span', { className: 'gm-usage-note' }, t('usage.dupes', { count: String(usage.duplicateCount) })) : null,
